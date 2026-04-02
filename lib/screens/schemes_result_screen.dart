@@ -4,325 +4,200 @@ import '../models/scheme_model.dart';
 import '../widgets/scheme_card.dart';
 import 'details_screen.dart';
 
-/// Results screen displaying the list of matched government schemes.
-/// Features search, filter chips, and scheme cards with view/apply actions.
+/// Results screen — displays matched schemes as a searchable, filterable list.
 class SchemesResultScreen extends StatefulWidget {
   final List<SchemeModel> schemes;
 
-  const SchemesResultScreen({
-    Key? key,
-    required this.schemes,
-  }) : super(key: key);
+  const SchemesResultScreen({Key? key, required this.schemes}) : super(key: key);
 
   @override
   State<SchemesResultScreen> createState() => _SchemesResultScreenState();
 }
 
-class _SchemesResultScreenState extends State<SchemesResultScreen>
-    with SingleTickerProviderStateMixin {
-  /// Search query
-  String _searchQuery = '';
-
-  /// Active filter
-  String _activeFilter = 'All Schemes';
-
-  /// Search controller
+class _SchemesResultScreenState extends State<SchemesResultScreen> {
   final TextEditingController _searchController = TextEditingController();
+  String _query = '';
+  String _activeFilter = 'All';
 
-  /// Animation controller for staggered list entry
-  late AnimationController _listAnimController;
-
-  /// Filter options
-  final List<String> _filters = [
-    'All Schemes',
-    'Category',
-    'State',
-    'Benefit Type',
-  ];
-
-  @override
-  void initState() {
-    super.initState();
-    _listAnimController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 800),
-    )..forward();
-  }
+  final List<String> _filters = ['All', 'Full Match', 'Partial Match'];
 
   @override
   void dispose() {
     _searchController.dispose();
-    _listAnimController.dispose();
     super.dispose();
   }
 
-  /// Filtered list of schemes based on search and filter
-  List<SchemeModel> get _filteredSchemes {
-    List<SchemeModel> result = widget.schemes;
+  /// Sort by confidence (highest first) + apply search/filter
+  List<SchemeModel> get _filtered {
+    List<SchemeModel> list = List.from(widget.schemes)
+      ..sort((a, b) => b.confidenceScore.compareTo(a.confidenceScore));
 
-    // Apply search filter
-    if (_searchQuery.isNotEmpty) {
-      final query = _searchQuery.toLowerCase();
-      result = result.where((scheme) {
-        return scheme.schemeName.toLowerCase().contains(query) ||
-            scheme.benefits.toLowerCase().contains(query) ||
-            scheme.matchReason.toLowerCase().contains(query) ||
-            scheme.category.any((c) => c.toLowerCase().contains(query));
-      }).toList();
+    if (_query.isNotEmpty) {
+      final q = _query.toLowerCase();
+      list = list.where((s) =>
+          s.schemeName.toLowerCase().contains(q) ||
+          s.benefits.toLowerCase().contains(q) ||
+          s.category.any((c) => c.toLowerCase().contains(q))).toList();
     }
 
-    // Sort by confidence score (highest first)
-    result.sort((a, b) => b.confidenceScore.compareTo(a.confidenceScore));
+    if (_activeFilter == 'Full Match') {
+      list = list.where((s) => s.matchType.toLowerCase().contains('full')).toList();
+    } else if (_activeFilter == 'Partial Match') {
+      list = list.where((s) => !s.matchType.toLowerCase().contains('full')).toList();
+    }
 
-    return result;
+    return list;
   }
 
-  /// Find the top match scheme
+  /// The scheme with the highest confidence score
   SchemeModel? get _topMatch {
     if (widget.schemes.isEmpty) return null;
-    final sorted = List<SchemeModel>.from(widget.schemes)
-      ..sort((a, b) => b.confidenceScore.compareTo(a.confidenceScore));
-    return sorted.first;
+    return (List.from(widget.schemes)
+          ..sort((a, b) => b.confidenceScore.compareTo(a.confidenceScore)))
+        .first;
   }
 
-  /// Navigate to details screen
   void _openDetails(SchemeModel scheme) {
     Navigator.of(context).push(
-      PageRouteBuilder(
-        pageBuilder: (context, animation, secondaryAnimation) =>
-            DetailsScreen(scheme: scheme),
-        transitionsBuilder: (context, animation, secondaryAnimation, child) {
-          return FadeTransition(
-            opacity: animation,
-            child: SlideTransition(
-              position: Tween<Offset>(
-                begin: const Offset(0.04, 0),
-                end: Offset.zero,
-              ).animate(CurvedAnimation(
-                parent: animation,
-                curve: Curves.easeOutCubic,
-              )),
-              child: child,
-            ),
-          );
-        },
-        transitionDuration: const Duration(milliseconds: 350),
-      ),
+      MaterialPageRoute(builder: (_) => DetailsScreen(scheme: scheme)),
     );
   }
 
-  /// Handle apply now action
-  void _handleApplyNow(SchemeModel scheme) {
-    if (scheme.applicationLink.isNotEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Row(
-            children: [
-              const Icon(Icons.open_in_new, color: Colors.white, size: 18),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text('Opening ${scheme.schemeName} application...'),
-              ),
-            ],
-          ),
-          behavior: SnackBarBehavior.floating,
-          backgroundColor: const Color(0xFF1E293B),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-        ),
-      );
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Application link not available yet.'),
-          behavior: SnackBarBehavior.floating,
-          backgroundColor: const Color(0xFFF59E0B),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-        ),
-      );
-    }
+  void _applyNow(SchemeModel scheme) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Opening application for ${scheme.schemeName}...'),
+        backgroundColor: AppColors.primary,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    );
+    // TODO: Use url_launcher to open scheme.applicationLink
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFB),
+      backgroundColor: AppColors.surface,
       appBar: _buildAppBar(),
       body: widget.schemes.isEmpty ? _buildEmptyState() : _buildBody(),
-      bottomNavigationBar: widget.schemes.isNotEmpty
-          ? _buildBottomNavBar()
-          : null,
+      bottomNavigationBar: _buildBottomNav(),
     );
   }
 
-  /// Custom app bar
   PreferredSizeWidget _buildAppBar() {
     return AppBar(
       backgroundColor: Colors.white,
       elevation: 0,
       leading: IconButton(
-        icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
-        color: const Color(0xFF1E293B),
+        icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20, color: AppColors.navy),
         onPressed: () => Navigator.of(context).pop(),
       ),
       title: const Text(
         'Your Eligible Schemes',
-        style: TextStyle(
-          color: Color(0xFF1E293B),
-          fontSize: 17,
-          fontWeight: FontWeight.w700,
-        ),
+        style: TextStyle(color: AppColors.navy, fontSize: 17, fontWeight: FontWeight.w700),
       ),
       centerTitle: false,
       actions: [
         Container(
           margin: const EdgeInsets.only(right: 16),
-          width: 34,
-          height: 34,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           decoration: BoxDecoration(
-            color: const Color(0xFF0D9488),
+            color: AppColors.primary,
             borderRadius: BorderRadius.circular(10),
           ),
-          child: const Center(
-            child: Text(
-              'AI',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
+          child: const Text('AI',
+              style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700)),
         ),
       ],
-      bottom: PreferredSize(
-        preferredSize: const Size.fromHeight(1),
-        child: Container(
-          color: const Color(0xFFF1F5F9),
-          height: 1,
-        ),
+      bottom: const PreferredSize(
+        preferredSize: Size.fromHeight(1),
+        child: Divider(height: 1, color: Color(0xFFF1F5F9)),
       ),
     );
   }
 
-  /// Main body content
   Widget _buildBody() {
-    final filtered = _filteredSchemes;
-
+    final filtered = _filtered;
     return Column(
       children: [
-        // Search bar
+        const SizedBox(height: Spacing.md),
         _buildSearchBar(),
-
-        // Filter chips
+        const SizedBox(height: Spacing.sm),
         _buildFilterChips(),
-
-        // Results count
         _buildResultsCount(filtered.length),
-
-        // Scheme cards list
         Expanded(
           child: filtered.isEmpty
               ? _buildNoResultsState()
-              : _buildSchemesList(filtered),
+              : _buildList(filtered),
         ),
       ],
     );
   }
 
-  /// Search bar
   Widget _buildSearchBar() {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: const Color(0xFFE2E8F0)),
-        ),
-        child: TextField(
-          controller: _searchController,
-          onChanged: (value) {
-            setState(() => _searchQuery = value);
-          },
-          decoration: InputDecoration(
-            hintText: 'Search schemes...',
-            hintStyle: const TextStyle(
-              color: Color(0xFF94A3B8),
-              fontSize: 14,
-            ),
-            prefixIcon: const Icon(
-              Icons.search_rounded,
-              color: Color(0xFF94A3B8),
-              size: 22,
-            ),
-            suffixIcon: _searchQuery.isNotEmpty
-                ? IconButton(
-                    icon: const Icon(Icons.close_rounded, size: 20),
-                    color: const Color(0xFF94A3B8),
-                    onPressed: () {
-                      _searchController.clear();
-                      setState(() => _searchQuery = '');
-                    },
-                  )
-                : null,
-            border: InputBorder.none,
-            enabledBorder: InputBorder.none,
-            focusedBorder: InputBorder.none,
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 16,
-              vertical: 14,
-            ),
-          ),
+      padding: const EdgeInsets.symmetric(horizontal: Spacing.lg),
+      child: TextField(
+        controller: _searchController,
+        onChanged: (v) => setState(() => _query = v),
+        decoration: InputDecoration(
+          hintText: 'Search schemes...',
+          prefixIcon: const Icon(Icons.search_rounded, color: AppColors.textLight, size: 22),
+          suffixIcon: _query.isNotEmpty
+              ? IconButton(
+                  icon: const Icon(Icons.close_rounded, size: 18, color: AppColors.textLight),
+                  onPressed: () {
+                    _searchController.clear();
+                    setState(() => _query = '');
+                  },
+                )
+              : null,
+          filled: true,
+          fillColor: Colors.white,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(color: AppColors.border)),
+          enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(color: AppColors.border)),
+          focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(color: AppColors.primary, width: 2)),
         ),
       ),
     );
   }
 
-  /// Horizontal filter chips
   Widget _buildFilterChips() {
     return SizedBox(
-      height: 48,
+      height: 44,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
+        padding: const EdgeInsets.symmetric(horizontal: Spacing.lg),
         itemCount: _filters.length,
         separatorBuilder: (_, __) => const SizedBox(width: 8),
-        itemBuilder: (context, index) {
-          final filter = _filters[index];
-          final isActive = _activeFilter == filter;
-
+        itemBuilder: (context, i) {
+          final f = _filters[i];
+          final active = _activeFilter == f;
           return GestureDetector(
-            onTap: () {
-              setState(() => _activeFilter = filter);
-            },
+            onTap: () => setState(() => _activeFilter = f),
             child: AnimatedContainer(
-              duration: AppConstants.Animations.fast,
+              duration: const Duration(milliseconds: 200),
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               decoration: BoxDecoration(
-                color: isActive
-                    ? const Color(0xFF0D9488)
-                    : Colors.white,
-                borderRadius: BorderRadius.circular(
-                  AppConstants.BorderRadius.pill,
-                ),
+                color: active ? AppColors.primary : Colors.white,
+                borderRadius: BorderRadius.circular(100),
                 border: Border.all(
-                  color: isActive
-                      ? const Color(0xFF0D9488)
-                      : const Color(0xFFE2E8F0),
-                ),
+                    color: active ? AppColors.primary : AppColors.border),
               ),
-              child: Center(
-                child: Text(
-                  filter,
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: isActive ? Colors.white : const Color(0xFF475569),
-                  ),
+              child: Text(
+                f,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: active ? Colors.white : AppColors.textMedium,
                 ),
               ),
             ),
@@ -332,77 +207,39 @@ class _SchemesResultScreenState extends State<SchemesResultScreen>
     );
   }
 
-  /// Results count indicator
   Widget _buildResultsCount(int count) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
+      padding: const EdgeInsets.fromLTRB(20, 10, 20, 4),
       child: Row(
         children: [
           Text(
             '$count scheme${count != 1 ? 's' : ''} found',
-            style: const TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w500,
-              color: Color(0xFF64748B),
-            ),
-          ),
-          const Spacer(),
-          Icon(
-            Icons.tune_rounded,
-            size: 18,
-            color: const Color(0xFF94A3B8),
+            style: TextStyle(fontSize: 13, color: Colors.grey[500]),
           ),
         ],
       ),
     );
   }
 
-  /// Scheme cards list
-  Widget _buildSchemesList(List<SchemeModel> schemes) {
-    return AnimatedBuilder(
-      animation: _listAnimController,
-      builder: (context, _) {
-        return ListView.builder(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-          itemCount: schemes.length,
-          itemBuilder: (context, index) {
-            final scheme = schemes[index];
-            final isTop = _topMatch != null &&
-                scheme.schemeName == _topMatch!.schemeName &&
-                index == 0;
-
-            // Staggered animation
-            final delay = (index * 0.15).clamp(0.0, 0.8);
-            final itemAnimation = Tween<double>(begin: 0, end: 1).animate(
-              CurvedAnimation(
-                parent: _listAnimController,
-                curve: Interval(delay, (delay + 0.4).clamp(0.0, 1.0),
-                    curve: Curves.easeOutCubic),
-              ),
-            );
-
-            return FadeTransition(
-              opacity: itemAnimation,
-              child: SlideTransition(
-                position: Tween<Offset>(
-                  begin: const Offset(0, 0.08),
-                  end: Offset.zero,
-                ).animate(itemAnimation),
-                child: SchemeCard(
-                  scheme: scheme,
-                  isTopMatch: isTop,
-                  onViewDetails: () => _openDetails(scheme),
-                  onApplyNow: () => _handleApplyNow(scheme),
-                ),
-              ),
-            );
-          },
+  Widget _buildList(List<SchemeModel> schemes) {
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+      itemCount: schemes.length,
+      itemBuilder: (context, i) {
+        final scheme = schemes[i];
+        final isTop = _topMatch != null &&
+            scheme.schemeName == _topMatch!.schemeName &&
+            i == 0;
+        return SchemeCard(
+          scheme: scheme,
+          isTopMatch: isTop,
+          onViewDetails: () => _openDetails(scheme),
+          onApplyNow: () => _applyNow(scheme),
         );
       },
     );
   }
 
-  /// Empty state when no schemes at all
   Widget _buildEmptyState() {
     return Center(
       child: Padding(
@@ -411,54 +248,32 @@ class _SchemesResultScreenState extends State<SchemesResultScreen>
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
-              width: 80,
-              height: 80,
+              width: 72, height: 72,
               decoration: BoxDecoration(
-                color: const Color(0xFFF1F5F9),
-                borderRadius: BorderRadius.circular(20),
+                color: Colors.grey[100],
+                borderRadius: BorderRadius.circular(18),
               ),
-              child: const Center(
-                child: Icon(
-                  Icons.inbox_rounded,
-                  size: 40,
-                  color: Color(0xFF94A3B8),
-                ),
-              ),
+              child: const Icon(Icons.inbox_rounded, size: 36, color: AppColors.textLight),
             ),
-            const SizedBox(height: 24),
-            const Text(
-              'No Schemes Found',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.w700,
-                color: Color(0xFF1E293B),
-              ),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'We couldn\'t find any eligible schemes\nfor your profile. Try adjusting your details.',
-              style: TextStyle(
-                fontSize: 14,
-                color: Color(0xFF64748B),
-                height: 1.5,
-              ),
+            const SizedBox(height: Spacing.xl),
+            const Text('No Schemes Found',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: AppColors.navy)),
+            const SizedBox(height: Spacing.sm),
+            Text(
+              'We couldn\'t find any eligible schemes for your profile.\nTry adjusting your details.',
+              style: TextStyle(fontSize: 14, color: Colors.grey[600], height: 1.5),
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: Spacing.xxl),
             OutlinedButton.icon(
               onPressed: () => Navigator.of(context).pop(),
               icon: const Icon(Icons.arrow_back_rounded, size: 18),
               label: const Text('Go Back'),
               style: OutlinedButton.styleFrom(
-                foregroundColor: const Color(0xFF0D9488),
-                side: const BorderSide(color: Color(0xFF0D9488)),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 24,
-                  vertical: 12,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
+                foregroundColor: AppColors.primary,
+                side: const BorderSide(color: AppColors.primary),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
               ),
             ),
           ],
@@ -467,58 +282,39 @@ class _SchemesResultScreenState extends State<SchemesResultScreen>
     );
   }
 
-  /// No results state for search
   Widget _buildNoResultsState() {
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(
-            Icons.search_off_rounded,
-            size: 48,
-            color: Color(0xFF94A3B8),
-          ),
-          const SizedBox(height: 16),
-          const Text(
-            'No matching schemes',
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
-              color: Color(0xFF475569),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Try a different search term',
-            style: TextStyle(
-              fontSize: 13,
-              color: Colors.grey[500],
-            ),
-          ),
+          const Icon(Icons.search_off_rounded, size: 44, color: AppColors.textLight),
+          const SizedBox(height: 12),
+          const Text('No matching schemes',
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.textMedium)),
+          const SizedBox(height: 6),
+          Text('Try a different search term',
+              style: TextStyle(fontSize: 13, color: Colors.grey[500])),
         ],
       ),
     );
   }
 
-  /// Bottom navigation bar
-  Widget _buildBottomNavBar() {
+  Widget _buildBottomNav() {
     return Container(
       decoration: const BoxDecoration(
         color: Colors.white,
-        border: Border(
-          top: BorderSide(color: Color(0xFFF1F5F9), width: 1),
-        ),
+        border: Border(top: BorderSide(color: Color(0xFFF1F5F9))),
       ),
       child: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          padding: const EdgeInsets.symmetric(vertical: 4),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
-              _buildNavItem(Icons.home_rounded, 'Home', false),
-              _buildNavItem(Icons.description_rounded, 'Schemes', true),
-              _buildNavItem(Icons.check_circle_outline_rounded, 'Applied', false),
-              _buildNavItem(Icons.person_outline_rounded, 'Profile', false),
+              _navItem(Icons.home_rounded, 'Home', false),
+              _navItem(Icons.description_rounded, 'Schemes', true),
+              _navItem(Icons.check_circle_outline_rounded, 'Applied', false),
+              _navItem(Icons.person_outline_rounded, 'Profile', false),
             ],
           ),
         ),
@@ -526,36 +322,23 @@ class _SchemesResultScreenState extends State<SchemesResultScreen>
     );
   }
 
-  /// Bottom nav item
-  Widget _buildNavItem(IconData icon, String label, bool isActive) {
-    return InkWell(
-      onTap: () {},
-      borderRadius: BorderRadius.circular(12),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              icon,
-              size: 22,
-              color: isActive
-                  ? const Color(0xFF0D9488)
-                  : const Color(0xFF94A3B8),
+  Widget _navItem(IconData icon, String label, bool active) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 22, color: active ? AppColors.primary : AppColors.textLight),
+          const SizedBox(height: 3),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: active ? FontWeight.w600 : FontWeight.w500,
+              color: active ? AppColors.primary : AppColors.textLight,
             ),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
-                color: isActive
-                    ? const Color(0xFF0D9488)
-                    : const Color(0xFF94A3B8),
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
